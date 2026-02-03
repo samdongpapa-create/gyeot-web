@@ -4,16 +4,14 @@ import { useState } from "react";
 
 export default function Home() {
   const [url, setUrl] = useState("");
-  const [keywords, setKeywords] = useState("");
-  const [detail, setDetail] = useState("");
-
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
-
   const [paidLoading, setPaidLoading] = useState(false);
-  const [paidReport, setPaidReport] = useState("");
+
+  const [error, setError] = useState("");
   const [paidError, setPaidError] = useState("");
+
+  const [freeData, setFreeData] = useState(null);
+  const [paidReport, setPaidReport] = useState("");
 
   async function safeFetchJson(path, payload) {
     const res = await fetch(path, {
@@ -27,88 +25,70 @@ export default function Home() {
     let json;
     try {
       json = text ? JSON.parse(text) : null;
-    } catch (e) {
-      // 서버가 HTML/빈 문자열 등을 보냈을 때
-      const preview = (text || "").slice(0, 300);
+    } catch {
       throw new Error(
-        `서버 응답이 JSON이 아니야.\n\n응답 일부:\n${preview}`
+        `서버 응답이 JSON이 아니야.\n\n응답 일부:\n${(text || "").slice(0, 300)}`
       );
     }
 
-    if (!res.ok) {
-      throw new Error(json?.error || "요청에 실패했어.");
-    }
-
+    if (!res.ok) throw new Error(json?.error || "요청 실패");
     return json;
   }
 
-  async function analyzeFree() {
+  async function onFree() {
     setError("");
-    setResult(null);
+    setFreeData(null);
     setPaidReport("");
     setPaidError("");
 
     if (!url.trim()) {
-      setError("네이버 플레이스 주소를 입력해줘.");
+      setError("네이버 플레이스 URL을 입력해줘.");
       return;
     }
 
     setLoading(true);
     try {
-      const data = await safeFetchJson("/api/analyze/free", {
-        url: url.trim(),
-        keywords: keywords.trim(),
-        detail: detail.trim(),
-      });
-      setResult(data);
+      const data = await safeFetchJson("/api/analyze/free", { url: url.trim() });
+      setFreeData(data);
     } catch (e) {
-      setError(e.message || "알 수 없는 오류가 발생했어.");
+      setError(e.message || "오류");
     } finally {
       setLoading(false);
     }
   }
 
-  async function analyzePaid() {
+  async function onPaid() {
     setPaidError("");
     setPaidReport("");
 
     if (!url.trim()) {
-      setPaidError("네이버 플레이스 주소를 입력해줘.");
+      setPaidError("네이버 플레이스 URL을 입력해줘.");
       return;
     }
 
-    const ok = confirm(
-      "유료 리포트를 생성할까요? (현재는 결제 연동 전, 테스트용입니다)"
-    );
+    const ok = confirm("유료 리포트를 생성할까요? (현재는 결제 연동 전, 테스트)");
     if (!ok) return;
 
     setPaidLoading(true);
     try {
-      const data = await safeFetchJson("/api/analyze/paid", {
-        url: url.trim(),
-        keywords: keywords.trim(),
-        detail: detail.trim(),
-      });
+      const data = await safeFetchJson("/api/analyze/paid", { url: url.trim() });
       setPaidReport(data?.paid_report || "");
     } catch (e) {
-      setPaidError(e.message || "알 수 없는 오류");
+      setPaidError(e.message || "오류");
     } finally {
       setPaidLoading(false);
     }
   }
 
   return (
-    <main style={{ minHeight: "100vh", background: "white", color: "#111" }}>
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: "56px 20px" }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800 }}>
-          네이버 플레이스 분석기 (MVP)
-        </h1>
+    <main style={{ minHeight: "100vh", background: "#fff", color: "#111" }}>
+      <div style={{ maxWidth: 980, margin: "0 auto", padding: "56px 20px" }}>
+        <h1 style={{ fontSize: 28, fontWeight: 900 }}>네이버 플레이스 분석기</h1>
         <p style={{ marginTop: 8, color: "#555" }}>
-          플레이스 주소를 넣으면 <b>대표 키워드 · 상세설명 · 이미지</b> 기준으로
-          무료 요약 + 수정 포인트 1개, 그리고 유료 리포트를 생성합니다.
+          URL만 입력하면 <b>키워드/상세설명/이미지</b>를 자동 추출하고,
+          무료/유료 리포트를 생성합니다.
         </p>
 
-        {/* URL */}
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -122,44 +102,16 @@ export default function Home() {
           }}
         />
 
-        {/* 보완 입력(지금은 남겨두되, 다음 단계에서 숨김 처리 가능) */}
-        <input
-          value={keywords}
-          onChange={(e) => setKeywords(e.target.value)}
-          placeholder="대표 키워드 (선택, 쉼표로 구분)"
-          style={{
-            width: "100%",
-            marginTop: 10,
-            padding: 12,
-            borderRadius: 12,
-            border: "1px solid #ddd",
-          }}
-        />
-
-        <textarea
-          value={detail}
-          onChange={(e) => setDetail(e.target.value)}
-          placeholder="플레이스 상세설명 (선택, 복사해서 붙여넣기)"
-          rows={5}
-          style={{
-            width: "100%",
-            marginTop: 10,
-            padding: 12,
-            borderRadius: 12,
-            border: "1px solid #ddd",
-          }}
-        />
-
         <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
-            onClick={analyzeFree}
+            onClick={onFree}
             disabled={loading}
             style={{
               padding: "12px 16px",
               borderRadius: 12,
               border: "1px solid #111",
               background: "#111",
-              color: "white",
+              color: "#fff",
               cursor: "pointer",
               opacity: loading ? 0.6 : 1,
             }}
@@ -168,7 +120,7 @@ export default function Home() {
           </button>
 
           <button
-            onClick={analyzePaid}
+            onClick={onPaid}
             disabled={paidLoading}
             style={{
               padding: "12px 16px",
@@ -179,7 +131,7 @@ export default function Home() {
               opacity: paidLoading ? 0.6 : 1,
             }}
           >
-            {paidLoading ? "유료 리포트 생성 중..." : "유료 리포트 생성(테스트)"}
+            {paidLoading ? "유료 리포트 생성 중..." : "유료 리포트(테스트)"}
           </button>
         </div>
 
@@ -189,35 +141,49 @@ export default function Home() {
           </div>
         )}
 
-        {result && (
+        {freeData && (
           <div style={{ marginTop: 24, border: "1px solid #eee", borderRadius: 16, padding: 16 }}>
-            <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
-              {result?.extracted?.image && (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              {freeData?.extracted?.mainImage && (
                 <img
-                  src={result.extracted.image}
+                  src={freeData.extracted.mainImage}
                   alt="대표 이미지"
-                  style={{ width: 120, height: 120, objectFit: "cover", borderRadius: 12 }}
+                  style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 12 }}
                 />
               )}
-              <div style={{ flex: 1, minWidth: 260 }}>
+
+              <div style={{ flex: 1, minWidth: 280 }}>
                 <h2 style={{ margin: 0 }}>
-                  {result?.extracted?.title || "플레이스명(추출 실패)"}
+                  {freeData?.extracted?.name || "플레이스명(추출 실패)"}
                 </h2>
-                <p style={{ marginTop: 6, color: "#555", lineHeight: 1.6 }}>
-                  {result?.extracted?.desc || "설명 추출 실패"}
-                </p>
-                <div style={{ fontSize: 12, color: "#777", lineHeight: 1.6 }}>
-                  placeId: {result?.place_id || "-"} <br />
-                  analyzed: {result?.analyzed_url || "-"}
+
+                <div style={{ fontSize: 12, color: "#777", marginTop: 6, lineHeight: 1.6 }}>
+                  placeId: {freeData?.place_id || "-"} <br />
+                  analyzed: {freeData?.analyzed_url || "-"} <br />
+                  fetch_failed: {String(!!freeData?.fetch_failed)}
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontWeight: 800, marginBottom: 6 }}>자동 추출 키워드</div>
+                  <div style={{ color: "#333", lineHeight: 1.6 }}>
+                    {(freeData?.extracted?.keywords || []).join(", ") || "없음"}
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontWeight: 800, marginBottom: 6 }}>자동 추출 상세설명</div>
+                  <div style={{ color: "#333", lineHeight: 1.6 }}>
+                    {freeData?.extracted?.description || "없음"}
+                  </div>
                 </div>
               </div>
             </div>
 
             <hr style={{ margin: "16px 0" }} />
 
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>무료 리포트</div>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>무료 리포트</div>
             <pre style={{ whiteSpace: "pre-wrap", lineHeight: 1.7, margin: 0 }}>
-              {result?.free_report || "무료 리포트 생성 실패"}
+              {freeData?.free_report || "리포트 없음"}
             </pre>
           </div>
         )}
