@@ -91,13 +91,12 @@ const PAID_PROMPT = `
 
 3) 상세설명 개선안 (복붙용 2안)
 - 2안 모두 350~600자 내
-- 반드시 포함: 지역/업종/차별점/예약·문의 유도(과장 없이)/신뢰 요소(경력, 제품, 분위기 등 입력 정보 기반)
+- 반드시 포함: 지역/업종/차별점/예약·문의 유도(과장 없이)/신뢰 요소
 - 문장 톤: 사장님이 직접 쓴 것처럼 자연스럽게
 
 4) 이미지 구성 전략
 - 현재 이미지의 리스크/아쉬움 2~3개
 - 업종 공통 추천 컷 구성(최소 8컷) 리스트
-  예: 외부 1, 내부 2, 메인서비스 3, 가격/메뉴 1, 신뢰요소 1...
 - "대표 이미지" 선택 기준 3개
 
 5) 실행 우선순위 (바로 할 것 / 이번주 / 이번달)
@@ -145,13 +144,11 @@ export async function POST(req) {
     const descAuto = stripTags(pickMeta(html, "og:description"));
     const image = pickMeta(html, "og:image");
 
-    // category/location/대표키워드 "추출"은 안정적으로 어려울 수 있어
-    // 우선은 입력값(있으면) + og 메타 기반으로 유료 리포트 생성
     const vars = {
       place_name: title || "알 수 없음",
       category_guess: "미확인(가정 필요)",
       desc_short: clampText(descAuto || "미확인"),
-      current_keywords: (keywords && keywords.trim()) ? keywords.trim() : "미입력(리포트에서 추천 세트 제공)",
+      current_keywords: (keywords && keywords.trim()) ? keywords.trim() : "미입력(추천 세트 제공)",
       description_text: clampText((detail && detail.trim()) ? detail.trim() : (descAuto || "미확인")),
       main_image_url: image || "없음",
     };
