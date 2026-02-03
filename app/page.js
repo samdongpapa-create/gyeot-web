@@ -28,15 +28,32 @@ export default function Home() {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/analyze/free", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: url.trim(),
-          keywords: keywords.trim(),
-          detail: detail.trim(),
-        }),
-      });
+     const res = await fetch("/api/analyze/free", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    url: url.trim(),
+    keywords: keywords.trim(),
+    detail: detail.trim(),
+  }),
+});
+
+const text = await res.text();
+
+// JSON이 아닐 수도 있으니 안전 파싱
+let data = null;
+try {
+  data = text ? JSON.parse(text) : null;
+} catch (e) {
+  throw new Error(
+    "서버 응답이 JSON이 아니야. (배포 로그/에러 확인 필요)\n\n응답 일부:\n" +
+      text.slice(0, 200)
+  );
+}
+
+if (!res.ok) throw new Error(data?.error || "분석에 실패했어.");
+setResult(data);
+
 
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "분석에 실패했어.");
