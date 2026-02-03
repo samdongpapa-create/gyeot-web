@@ -1,12 +1,13 @@
 export const runtime = "nodejs";
+export const preferredRegion = ["icn1"];
 
 import OpenAI from "openai";
 
-/* ---------- URL 정규화 (mobile/desktop 통일) ---------- */
+/* ---------------- URL 정규화 ---------------- */
 function normalizeNaverPlaceUrl(input) {
   let u;
   try {
-    u = new URL(input.trim());
+    u = new URL((input || "").trim());
   } catch {
     return { ok: false };
   }
@@ -23,7 +24,7 @@ function normalizeNaverPlaceUrl(input) {
   };
 }
 
-/* ---------- HTML fetch ---------- */
+/* ---------------- fetch (안전/타임아웃) ---------------- */
 async function fetchHtml(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 9000);
@@ -36,15 +37,11 @@ async function fetchHtml(url) {
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
-    "Referer": "https://m.place.naver.com/"
+    "Referer": "https://m.place.naver.com/",
   };
 
   try {
-    const res = await fetch(url, {
-      headers,
-      redirect: "follow",
-      signal: controller.signal,
-    });
+    const res = await fetch(url, { headers, redirect: "follow", signal: controller.signal });
     const text = await res.text();
     clearTimeout(timeout);
     return { ok: res.ok, status: res.status, text };
@@ -54,30 +51,52 @@ async function fetchHtml(url) {
   }
 }
 
-    redirect: "follow",
-  });
-  const text = await res.text();
-  return { ok: res.ok, status: res.status, text };
-}
-
-/* ---------- helpers ---------- */
-function pickMeta(html, property) {
+/* ---------------- HTML 파서 유틸 ---------------- */
+function pickMeta(html, attr, key) {
+  // attr: property or name
   const re = new RegExp(
-    `<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)`,
+    `<meta[^>]+${attr}=["']${escapeRegExp(key)}["'][^>]+content=["']([^"']+)["']`,
     "i"
   );
   return html.match(re)?.[1] || "";
 }
-
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 function stripTags(s) {
   return (s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
+function uniq(arr) {
+  const out = [];
+  const set = new Set();
+  for (const v of arr || []) {
+    const t = String(v || "").trim();
+    if (!t) continue;
+    if (set.has(t)) continue;
+    set.add(t);
+    out.push(t);
+  }
+  return out;
+}
 
-/* ---------- __NEXT_DATA__ 추출 ---------- */
+/* ---------------- JSON-LD 추출 ---------------- */
+function extractJsonLd(html) {
+  const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+    .map(m => m[1])
+    .filter(Boolean);
+
+  const parsed = [];
+  for (const b of blocks) {
+    try {
+      parsed.push(JSON.parse(b.trim()));
+    } catch {}
+  }
+  return parsed;
+}
+
+/* ---------------- __NEXT_DATA__ 추출 ---------------- */
 function extractNextData(html) {
-  const m = html.match(
-    /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i
-  );
+  const m = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
   if (!m?.[1]) return null;
   try {
     return JSON.parse(m[1]);
@@ -86,118 +105,116 @@ function extractNextData(html) {
   }
 }
 
-// 객체 전체를 훑어서 특정 키 후보를 찾아내는 “휴리스틱”
-function deepFindStrings(obj, keyCandidates = [], limit = 20) {
+/* ---------------- 딥서치(유사 구조 대응) ---------------- */
+function deepCollect(node, predicate, limit = 50) {
   const out = [];
   const seen = new Set();
 
-  function walk(node) {
-    if (!node || out.length >= limit) return;
-    if (typeof node !== "object") return;
+  function walk(x) {
+    if (!x || out.length >= limit) return;
+    if (typeof x !== "object") return;
 
-    if (Array.isArray(node)) {
-      for (const v of node) walk(v);
+    if (Array.isArray(x)) {
+      for (const v of x) walk(v);
       return;
     }
 
-    for (const [k, v] of Object.entries(node)) {
-      const kk = k.toLowerCase();
-
-      // 키워드 후보 키면 string/array 뽑기
-      if (keyCandidates.includes(kk)) {
-        if (typeof v === "string") {
-          const val = v.trim();
-          if (val && !seen.has(val)) {
-            seen.add(val);
-            out.push(val);
-          }
-        } else if (Array.isArray(v)) {
-          for (const it of v) {
-            if (typeof it === "string") {
-              const val = it.trim();
-              if (val && !seen.has(val)) {
-                seen.add(val);
-                out.push(val);
-              }
-            } else if (it && typeof it === "object") {
-              // {name:""} 형태도 대응
-              const name = it.name || it.keyword || it.text;
-              if (typeof name === "string") {
-                const val = name.trim();
-                if (val && !seen.has(val)) {
-                  seen.add(val);
-                  out.push(val);
-                }
-              }
-            }
-          }
-        } else if (v && typeof v === "object") {
-          const name = v.name || v.keyword || v.text;
-          if (typeof name === "string") {
-            const val = name.trim();
-            if (val && !seen.has(val)) {
-              seen.add(val);
-              out.push(val);
-            }
+    for (const [k, v] of Object.entries(x)) {
+      try {
+        const got = predicate(k, v);
+        if (got) {
+          const vals = Array.isArray(got) ? got : [got];
+          for (const val of vals) {
+            const t = String(val || "").trim();
+            if (!t) continue;
+            if (seen.has(t)) continue;
+            seen.add(t);
+            out.push(t);
+            if (out.length >= limit) return;
           }
         }
-      }
+      } catch {}
 
       walk(v);
+      if (out.length >= limit) return;
     }
   }
 
-  walk(obj);
+  walk(node);
   return out;
 }
 
-function deepFindFirstString(obj, keyCandidates = []) {
-  let found = "";
-  function walk(node) {
-    if (!node || found) return;
-    if (typeof node !== "object") return;
+function guessKeywordsFromData(nextData, html) {
+  const metaKeywords = pickMeta(html, "name", "keywords");
+  const metaList = metaKeywords ? metaKeywords.split(",").map(s => s.trim()) : [];
 
-    if (Array.isArray(node)) {
-      for (const v of node) walk(v);
-      return;
-    }
-
-    for (const [k, v] of Object.entries(node)) {
-      const kk = k.toLowerCase();
-      if (keyCandidates.includes(kk) && typeof v === "string") {
-        const val = v.trim();
-        if (val) {
-          found = val;
-          return;
+  const nextList = nextData
+    ? deepCollect(nextData, (k, v) => {
+        const kk = k.toLowerCase();
+        if (["keywords", "keyword", "tags", "tag", "hashtags", "hashtag"].includes(kk)) {
+          if (typeof v === "string") return v.split(",").map(s => s.trim());
+          if (Array.isArray(v)) return v.map(x => (typeof x === "string" ? x : x?.name || x?.text)).filter(Boolean);
         }
-      }
-      walk(v);
-      if (found) return;
-    }
-  }
-  walk(obj);
-  return found;
+        return null;
+      }, 40)
+    : [];
+
+  return uniq([...metaList, ...nextList]).slice(0, 20);
 }
 
+function guessDescription(nextData, jsonlds, html) {
+  const ogDesc = stripTags(pickMeta(html, "property", "og:description"));
+  const ldDesc = (jsonlds || [])
+    .map(x => x?.description)
+    .filter(Boolean)
+    .map(stripTags)[0] || "";
+
+  const nextDesc = nextData
+    ? (deepCollect(nextData, (k, v) => {
+        const kk = k.toLowerCase();
+        if (["description", "introduce", "introduction", "summary", "content"].includes(kk) && typeof v === "string") {
+          return stripTags(v);
+        }
+        return null;
+      }, 10)[0] || "")
+    : "";
+
+  // 길이/품질 우선순위: next > ld > og
+  return (nextDesc || ldDesc || ogDesc || "").trim();
+}
+
+function guessName(jsonlds, html) {
+  const ogTitle = stripTags(pickMeta(html, "property", "og:title"));
+  const ldName = (jsonlds || []).map(x => x?.name).filter(Boolean)[0] || "";
+  return (ogTitle || ldName || "").trim();
+}
+
+function guessMainImage(jsonlds, html) {
+  const ogImg = pickMeta(html, "property", "og:image");
+  const ldImg = (jsonlds || [])
+    .map(x => x?.image)
+    .flat()
+    .find(v => typeof v === "string" && v.startsWith("http")) || "";
+  return (ogImg || ldImg || "").trim();
+}
+
+/* ---------------- FREE 프롬프트 ---------------- */
 const FREE_PROMPT = `
 너는 네이버 플레이스 로컬 SEO를 분석하는 전문가다.
-아래 플레이스 정보를 바탕으로,
-사장님이 이해하기 쉬운 말로 "가장 큰 손실 포인트 1개"만 짚어라.
+아래 정보를 바탕으로 사장님이 이해하기 쉬운 말로 "가장 큰 손실 포인트 1개"만 짚어라.
 
-⚠️ 규칙
-- 순위/노출 보장 금지
-- 해결책 여러 개 금지(딱 1개)
-- 짧고 명확하게
+규칙
+- 노출/순위 보장 금지
+- 해결책 여러개 금지 (딱 1개)
+- 짧고 명확
 
-[입력 정보]
-- 플레이스명: {{place_name}}
-- 현재 대표 키워드: {{current_keywords}}
-- 상세 설명 텍스트: {{description_text}}
-- 이미지 정보:
-  - 대표 이미지 여부: {{has_main_image}}
-  - 대표 이미지 URL: {{main_image_url}}
+입력
+- 플레이스명: {{name}}
+- 대표 키워드(추출): {{keywords}}
+- 상세설명(추출): {{description}}
+- 대표 이미지: {{hasImage}}
 
-[출력 형식]
+출력 형식
 1. 한 줄 요약
 2. 가장 아쉬운 포인트 1가지
 3. 지금 바로 수정하면 좋은 포인트 1개
@@ -207,93 +224,70 @@ function fill(tpl, vars) {
   return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
 }
 
+/* ---------------- API ---------------- */
 export async function POST(req) {
   try {
-    const { url, keywords, detail } = await req.json();
+    const { url } = await req.json();
 
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey || !apiKey.trim()) {
-      return new Response(JSON.stringify({ error: "OPENAI_API_KEY가 비어있어." }), { status: 400 });
+    if (!apiKey) {
+      return new Response(JSON.stringify({ error: "OPENAI_API_KEY가 설정되지 않았어." }), { status: 400 });
     }
 
-    const norm = normalizeNaverPlaceUrl(url || "");
+    const norm = normalizeNaverPlaceUrl(url);
     if (!norm.ok) {
       return new Response(JSON.stringify({ error: "네이버 플레이스 URL을 확인해줘." }), { status: 400 });
     }
 
-    // PC → 모바일 fallback
-    let fetched = await fetchHtml(norm.desktop);
-    let usedUrl = norm.desktop;
+    // 모바일이 __NEXT_DATA__를 포함할 확률이 더 높아서 mobile 먼저 시도
+    let fetched = await fetchHtml(norm.mobile);
+    let usedUrl = norm.mobile;
 
     if (!fetched.ok || !fetched.text || fetched.text.length < 500) {
-      const f2 = await fetchHtml(norm.mobile);
+      const f2 = await fetchHtml(norm.desktop);
       if (f2.ok) {
         fetched = f2;
-        usedUrl = norm.mobile;
+        usedUrl = norm.desktop;
       }
     }
 
-    const html = fetched.text || "";
+    if (!fetched.ok || !fetched.text) {
+      // ✅ fetch 실패여도 JSON으로 “정상 응답” (프론트가 안 죽게)
+      return new Response(
+        JSON.stringify({
+          place_id: norm.placeId,
+          analyzed_url: usedUrl,
+          fetch_failed: true,
+          extracted: { name: "", keywords: [], description: "", mainImage: "" },
+          free_report:
+            "네이버 페이지를 서버에서 가져오지 못했어(fetch failed).\n\n가능한 원인:\n- 네이버가 서버/해외 IP 요청을 차단\n- Vercel 함수 리전이 한국이 아님\n\n조치:\n1) vercel.json(icn1) 적용 후 재배포\n2) 그래도 안 되면 '한국 egress 서버(프록시)'가 필요할 수 있어.",
+        }),
+        { status: 200 }
+      );
+    }
 
-    // OG 메타(항상 보험)
-    const ogTitle = pickMeta(html, "og:title");
-    const ogDesc = stripTags(pickMeta(html, "og:description"));
-    const ogImage = pickMeta(html, "og:image");
-
-    // 모바일 Next.js 데이터에서 추가 추출 시도
+    const html = fetched.text;
+    const jsonlds = extractJsonLd(html);
     const nextData = extractNextData(html);
 
-    // 상세설명 후보 키들 (네이버 구조 바뀌어도 최대한 잡는 용도)
-    const descFromNext =
-      nextData
-        ? deepFindFirstString(nextData, ["description", "introduce", "introduction", "summary", "content"])
-        : "";
+    const name = guessName(jsonlds, html) || "알 수 없음";
+    const keywords = guessKeywordsFromData(nextData, html);
+    const description = guessDescription(nextData, jsonlds, html);
+    const mainImage = guessMainImage(jsonlds, html);
 
-    // 대표키워드 후보(태그/키워드)
-    const kwsFromNext =
-      nextData
-        ? deepFindStrings(nextData, ["keywords", "keyword", "tag", "tags", "hash", "hashtags"], 20)
-        : [];
-
-    // 대표 이미지 후보(이미지 URL이 여러 곳에 있을 수 있어 배열로 탐색)
-    const imgCandidates =
-      nextData
-        ? deepFindStrings(nextData, ["image", "images", "thumbnail", "thumbnails", "photo", "photos", "url"], 30)
-        : [];
-    const firstImageFromNext = imgCandidates.find(v => typeof v === "string" && v.startsWith("http")) || "";
-
-    const title = ogTitle || "알 수 없음";
-
-    // 사용자 입력이 있으면 우선, 없으면 자동 추출 사용
-    const finalDetail =
-      (detail && detail.trim()) ||
-      descFromNext ||
-      ogDesc ||
-      "미확인";
-
-    const finalKeywords =
-      (keywords && keywords.trim()) ||
-      (kwsFromNext.length ? kwsFromNext.slice(0, 12).join(", ") : "") ||
-      "미확인";
-
-    const mainImageUrl = ogImage || firstImageFromNext || "";
-
-    const vars = {
-      place_name: title,
-      current_keywords: finalKeywords,
-      description_text: finalDetail,
-      has_main_image: mainImageUrl ? "예" : "아니오",
-      main_image_url: mainImageUrl || "없음",
-    };
-
-    const prompt = fill(FREE_PROMPT, vars);
+    const prompt = fill(FREE_PROMPT, {
+      name,
+      keywords: keywords.join(", ") || "없음",
+      description: description || "없음",
+      hasImage: mainImage ? "있음" : "없음",
+    });
 
     const client = new OpenAI({ apiKey });
     const completion = await client.chat.completions.create({
       model: "gpt-4.1-mini",
-      temperature: 0.4,
+      temperature: 0.35,
       messages: [
-        { role: "system", content: "출력은 한국어. 형식(1~3)을 지켜라. 짧게." },
+        { role: "system", content: "출력은 한국어. 형식을 지켜라. 짧게." },
         { role: "user", content: prompt },
       ],
     });
@@ -304,19 +298,18 @@ export async function POST(req) {
       JSON.stringify({
         place_id: norm.placeId,
         analyzed_url: usedUrl,
+        fetch_failed: false,
         extracted: {
-          title,
-          desc: ogDesc || descFromNext || "",
-          image: mainImageUrl,
-          auto_keywords: kwsFromNext.slice(0, 20), // 디버깅용(화면에 안 보여도 됨)
+          name,
+          keywords,
+          description,
+          mainImage,
         },
         free_report,
       }),
       { status: 200 }
     );
   } catch (e) {
-    // ✅ 어떤 에러가 나도 JSON으로 반환 (프론트 파싱 깨짐 방지)
     return new Response(JSON.stringify({ error: e?.message || "server error" }), { status: 500 });
   }
 }
-
