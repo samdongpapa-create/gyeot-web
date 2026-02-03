@@ -98,6 +98,20 @@ export async function POST(req) {
     }
 
     const html = fetched.text;
+    function pickJsonLd(html) {
+  const scripts = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  return scripts.map(s => s[1]).filter(Boolean);
+}
+const jsonlds = pickJsonLd(html);
+let ld = null;
+for (const s of jsonlds) {
+  try {
+    const obj = JSON.parse(s.trim());
+    // Place / LocalBusiness 형태를 우선
+    if (obj?.["@type"]) { ld = obj; break; }
+  } catch {}
+}
+
 
     // 2) 최소 정보 추출(가능한 범위)
     const ogTitle = pickMeta(html, "og:title");
