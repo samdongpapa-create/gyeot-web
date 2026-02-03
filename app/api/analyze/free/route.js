@@ -25,12 +25,41 @@ function normalizeNaverPlaceUrl(input) {
 
 /* ---------- HTML fetch ---------- */
 async function fetchHtml(url) {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120",
-      "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-    },
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 9000); // 9초 제한
+
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Referer": "https://m.place.naver.com/"
+  };
+
+  try {
+    // 1차 시도
+    const res1 = await fetch(url, { headers, redirect: "follow", signal: controller.signal });
+    const text1 = await res1.text();
+    clearTimeout(timeout);
+    return { ok: res1.ok, status: res1.status, text: text1 };
+  } catch (e) {
+    clearTimeout(timeout);
+
+    // 2차 재시도 (짧게 한 번 더)
+    try {
+      const res2 = await fetch(url, { headers, redirect: "follow" });
+      const text2 = await res2.text();
+      return { ok: res2.ok, status: res2.status, text: text2 };
+    } catch (e2) {
+      // ✅ 여기서 "fetch failed"를 JSON으로 명확히 내려주기
+      return { ok: false, status: 0, text: "" };
+    }
+  }
+}
+
     redirect: "follow",
   });
   const text = await res.text();
