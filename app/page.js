@@ -15,6 +15,33 @@ export default function Home() {
   const [paidReport, setPaidReport] = useState("");
   const [paidError, setPaidError] = useState("");
 
+  async function safeFetchJson(path, payload) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text();
+
+    let json;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch (e) {
+      // 서버가 HTML/빈 문자열 등을 보냈을 때
+      const preview = (text || "").slice(0, 300);
+      throw new Error(
+        `서버 응답이 JSON이 아니야.\n\n응답 일부:\n${preview}`
+      );
+    }
+
+    if (!res.ok) {
+      throw new Error(json?.error || "요청에 실패했어.");
+    }
+
+    return json;
+  }
+
   async function analyzeFree() {
     setError("");
     setResult(null);
@@ -28,35 +55,11 @@ export default function Home() {
 
     setLoading(true);
     try {
-     const res = await fetch("/api/analyze/free", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    url: url.trim(),
-    keywords: keywords.trim(),
-    detail: detail.trim(),
-  }),
-});
-
-const text = await res.text();
-
-// JSON이 아닐 수도 있으니 안전 파싱
-let data = null;
-try {
-  data = text ? JSON.parse(text) : null;
-} catch (e) {
-  throw new Error(
-    "서버 응답이 JSON이 아니야. (배포 로그/에러 확인 필요)\n\n응답 일부:\n" +
-      text.slice(0, 200)
-  );
-}
-
-if (!res.ok) throw new Error(data?.error || "분석에 실패했어.");
-setResult(data);
-
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "분석에 실패했어.");
+      const data = await safeFetchJson("/api/analyze/free", {
+        url: url.trim(),
+        keywords: keywords.trim(),
+        detail: detail.trim(),
+      });
       setResult(data);
     } catch (e) {
       setError(e.message || "알 수 없는 오류가 발생했어.");
@@ -74,24 +77,18 @@ setResult(data);
       return;
     }
 
-    // 결제 전 단계: 일단 확인창
-    const ok = confirm("유료 리포트를 생성할까요? (현재는 결제 연동 전, 테스트용입니다)");
+    const ok = confirm(
+      "유료 리포트를 생성할까요? (현재는 결제 연동 전, 테스트용입니다)"
+    );
     if (!ok) return;
 
     setPaidLoading(true);
     try {
-      const res = await fetch("/api/analyze/paid", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: url.trim(),
-          keywords: keywords.trim(),
-          detail: detail.trim(),
-        }),
+      const data = await safeFetchJson("/api/analyze/paid", {
+        url: url.trim(),
+        keywords: keywords.trim(),
+        detail: detail.trim(),
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "유료 리포트 생성 실패");
       setPaidReport(data?.paid_report || "");
     } catch (e) {
       setPaidError(e.message || "알 수 없는 오류");
@@ -125,7 +122,7 @@ setResult(data);
           }}
         />
 
-        {/* 보완 입력 */}
+        {/* 보완 입력(지금은 남겨두되, 다음 단계에서 숨김 처리 가능) */}
         <input
           value={keywords}
           onChange={(e) => setKeywords(e.target.value)}
@@ -187,7 +184,9 @@ setResult(data);
         </div>
 
         {error && (
-          <div style={{ marginTop: 14, color: "#a40000" }}>{error}</div>
+          <div style={{ marginTop: 14, color: "#a40000", whiteSpace: "pre-wrap" }}>
+            {error}
+          </div>
         )}
 
         {result && (
@@ -201,7 +200,9 @@ setResult(data);
                 />
               )}
               <div style={{ flex: 1, minWidth: 260 }}>
-                <h2 style={{ margin: 0 }}>{result?.extracted?.title || "플레이스명(추출 실패)"}</h2>
+                <h2 style={{ margin: 0 }}>
+                  {result?.extracted?.title || "플레이스명(추출 실패)"}
+                </h2>
                 <p style={{ marginTop: 6, color: "#555", lineHeight: 1.6 }}>
                   {result?.extracted?.desc || "설명 추출 실패"}
                 </p>
@@ -222,7 +223,9 @@ setResult(data);
         )}
 
         {paidError && (
-          <div style={{ marginTop: 14, color: "#a40000" }}>{paidError}</div>
+          <div style={{ marginTop: 14, color: "#a40000", whiteSpace: "pre-wrap" }}>
+            {paidError}
+          </div>
         )}
 
         {paidReport && (
