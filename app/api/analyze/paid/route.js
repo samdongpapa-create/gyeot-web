@@ -26,11 +26,11 @@ function normalizeNaverPlaceUrl(input) {
 /* ---------- HTML fetch ---------- */
 async function fetchHtml(url) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 9000); // 9초 제한
+  const timeout = setTimeout(() => controller.abort(), 9000);
 
   const headers = {
     "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
     "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
     "Accept":
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -40,25 +40,20 @@ async function fetchHtml(url) {
   };
 
   try {
-    // 1차 시도
-    const res1 = await fetch(url, { headers, redirect: "follow", signal: controller.signal });
-    const text1 = await res1.text();
+    const res = await fetch(url, {
+      headers,
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    const text = await res.text();
     clearTimeout(timeout);
-    return { ok: res1.ok, status: res1.status, text: text1 };
+    return { ok: res.ok, status: res.status, text };
   } catch (e) {
     clearTimeout(timeout);
-
-    // 2차 재시도 (짧게 한 번 더)
-    try {
-      const res2 = await fetch(url, { headers, redirect: "follow" });
-      const text2 = await res2.text();
-      return { ok: res2.ok, status: res2.status, text: text2 };
-    } catch (e2) {
-      // ✅ 여기서 "fetch failed"를 JSON으로 명확히 내려주기
-      return { ok: false, status: 0, text: "" };
-    }
+    return { ok: false, status: 0, text: "" };
   }
 }
+
 
 
 /* ---------- HTML helpers ---------- */
